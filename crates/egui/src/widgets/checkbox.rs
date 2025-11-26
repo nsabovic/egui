@@ -2,6 +2,7 @@ use crate::{
     Atom, AtomLayout, Atoms, Id, IntoAtoms, NumExt as _, Response, Sense, Shape, Ui, Vec2, Widget,
     WidgetInfo, WidgetType, epaint, pos2,
 };
+use std::ops::DerefMut;
 
 // TODO(emilk): allow checkbox without a text label
 /// Boolean on/off control with text label.
@@ -17,23 +18,33 @@ use crate::{
 /// # });
 /// ```
 #[must_use = "You should put this widget in a ui with `ui.add(widget);`"]
-pub struct Checkbox<'a> {
-    checked: &'a mut bool,
+pub struct Checkbox<'a, T: DerefMut<Target = bool>> {
+    checked: T,
     atoms: Atoms<'a>,
     indeterminate: bool,
 }
 
-impl<'a> Checkbox<'a> {
+impl<'a> Checkbox<'a, &'a mut bool> {
     pub fn new(checked: &'a mut bool, atoms: impl IntoAtoms<'a>) -> Self {
-        Checkbox {
+        Self::new_state(checked, atoms)
+    }
+
+    pub fn without_text(checked: &'a mut bool) -> Self {
+        Self::without_text_state(checked)
+    }
+}
+
+impl<'a, T: DerefMut<Target = bool>> Checkbox<'a, T> {
+    pub fn new_state(checked: T, atoms: impl IntoAtoms<'a>) -> Self {
+        Self {
             checked,
             atoms: atoms.into_atoms(),
             indeterminate: false,
         }
     }
 
-    pub fn without_text(checked: &'a mut bool) -> Self {
-        Self::new(checked, ())
+    pub fn without_text_state(checked: T) -> Self {
+        Self::new_state(checked, ())
     }
 
     /// Display an indeterminate state (neither checked nor unchecked)
@@ -47,10 +58,10 @@ impl<'a> Checkbox<'a> {
     }
 }
 
-impl Widget for Checkbox<'_> {
+impl<T: DerefMut<Target = bool>> Widget for Checkbox<'_, T> {
     fn ui(self, ui: &mut Ui) -> Response {
         let Checkbox {
-            checked,
+            mut checked,
             mut atoms,
             indeterminate,
         } = self;
