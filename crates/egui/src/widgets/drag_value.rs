@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     Button, CursorIcon, Id, Key, MINUS_CHAR_STR, Modifiers, NumExt as _, Response, RichText, Sense,
-    TextEdit, TextWrapMode, Ui, Widget, WidgetInfo, emath, text,
+    TextEdit, TextWrapMode, Ui, Widget, WidgetInfo, emath, text, text_edit::TextEditState,
 };
 
 // ----------------------------------------------------------------------------
@@ -765,7 +765,7 @@ pub(crate) fn clamp_value_to_range(x: f64, range: RangeInclusive<f64>) -> f64 {
 
 /// Select all text in the `DragValue` text edit widget.
 fn select_all_text(ui: &Ui, widget_id: Id, response_id: Id, value_text: &str) {
-    let mut state = TextEdit::load_state(ui.ctx(), widget_id).unwrap_or_default();
+    let mut state = TextEditState::load(ui.ctx(), widget_id).unwrap_or_default();
     state.cursor.set_char_range(Some(text::CCursorRange::two(
         text::CCursor::default(),
         text::CCursor::new(value_text.chars().count()),

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::DerefMut, sync::Arc};
 
 use emath::{Rect, TSTransform};
 use epaint::{
@@ -65,8 +65,12 @@ type LayouterFn<'t> = &'t mut dyn FnMut(&Ui, &dyn TextBuffer, f32) -> Arc<Galley
 /// ## Other
 /// The background color of a [`crate::TextEdit`] is [`crate::Visuals::text_edit_bg_color`] or can be set with [`crate::TextEdit::background_color`].
 #[must_use = "You should put this widget in a ui with `ui.add(widget);`"]
-pub struct TextEdit<'t> {
-    text: &'t mut dyn TextBuffer,
+pub struct TextEdit<'t, T>
+where
+    T: DerefMut,
+    T::Target: TextBuffer + 't,
+{
+    text: T,
     hint_text: WidgetText,
     hint_text_font: Option<FontSelection>,
     id: Option<Id>,
@@ -91,33 +95,43 @@ pub struct TextEdit<'t> {
     background_color: Option<Color32>,
 }
 
-impl WidgetWithState for TextEdit<'_> {
+impl<'t, T> WidgetWithState for TextEdit<'t, T>
+where
+    T: DerefMut,
+    T::Target: TextBuffer + 't,
+{
     type State = TextEditState;
 }
 
-impl TextEdit<'_> {
-    pub fn load_state(ctx: &Context, id: Id) -> Option<TextEditState> {
-        TextEditState::load(ctx, id)
-    }
-
-    pub fn store_state(ctx: &Context, id: Id, state: TextEditState) {
-        state.store(ctx, id);
-    }
-}
-
-impl<'t> TextEdit<'t> {
+impl<'t> TextEdit<'t, &'t mut dyn TextBuffer> {
     /// No newlines (`\n`) allowed. Pressing enter key will result in the [`TextEdit`] losing focus (`response.lost_focus`).
     pub fn singleline(text: &'t mut dyn TextBuffer) -> Self {
-        Self {
-            desired_height_rows: 1,
-            multiline: false,
-            clip_text: true,
-            ..Self::multiline(text)
-        }
+        Self::singleline_state(text)
     }
 
     /// A [`TextEdit`] for multiple lines. Pressing enter key will create a new line by default (can be changed with [`return_key`](TextEdit::return_key)).
     pub fn multiline(text: &'t mut dyn TextBuffer) -> Self {
+        Self::multiline_with_state(text)
+    }
+}
+
+impl<'t, T> TextEdit<'t, T>
+where
+    T: DerefMut,
+    T::Target: TextBuffer + 't,
+{
+    /// A [`TextEdit`] for a single line backed by any buffer.
+    pub fn singleline_state(text: T) -> Self {
+        Self {
+            desired_height_rows: 1,
+            multiline: false,
+            clip_text: true,
+            ..Self::multiline_with_state(text)
+        }
+    }
+
+    /// A [`TextEdit`] for multiple lines backed by any buffer.
+    pub fn multiline_with_state(text: T) -> Self {
         Self {
             text,
             hint_text: Default::default(),
@@ -400,13 +414,21 @@ impl<'t> TextEdit<'t> {
 
 // ----------------------------------------------------------------------------
 
-impl Widget for TextEdit<'_> {
+impl<'t, T> Widget for TextEdit<'t, T>
+where
+    T: DerefMut,
+    T::Target: TextBuffer + 't,
+{
     fn ui(self, ui: &mut Ui) -> Response {
         self.show(ui).response
     }
 }
 
-impl TextEdit<'_> {
+impl<'t, T> TextEdit<'t, T>
+where
+    T: DerefMut,
+    T::Target: TextBuffer + 't,
+{
     /// Show the [`TextEdit`], returning a rich [`TextEditOutput`].
     ///
     /// ```
@@ -470,7 +492,7 @@ impl TextEdit<'_> {
 
     fn show_content(self, ui: &mut Ui) -> TextEditOutput {
         let TextEdit {
-            text,
+            mut text,
             hint_text,
             hint_text_font,
             id,
@@ -527,7 +549,7 @@ impl TextEdit<'_> {
 
         let layouter = layouter.unwrap_or(&mut default_layouter);
 
-        let mut galley = layouter(ui, text, wrap_width);
+        let mut galley = layouter(ui, &*text, wrap_width);
 
         let desired_inner_width = if clip_text {
             wrap_width // visual clipping with scroll in singleline input.
@@ -627,7 +649,7 @@ impl TextEdit<'_> {
             let (changed, new_cursor_range) = events(
                 ui,
                 &mut state,
-                text,
+                &mut text,
                 &mut galley,
                 layouter,
                 id,
@@ -820,7 +842,7 @@ impl TextEdit<'_> {
                 WidgetInfo::text_edit(
                     ui.is_enabled(),
                     mask_if_password(password, prev_text.as_str()),
-                    mask_if_password(password, text),
+                    mask_if_password(password, &text),
                     hint_text_str.as_str(),
                 )
             });
@@ -830,7 +852,7 @@ impl TextEdit<'_> {
             let info = WidgetInfo::text_selection_changed(
                 ui.is_enabled(),
                 char_range,
-                mask_if_password(password, text),
+                mask_if_password(password, &text),
             );
             response.output_event(OutputEvent::TextSelectionChanged(info));
         } else {
@@ -838,7 +860,7 @@ impl TextEdit<'_> {
                 WidgetInfo::text_edit(
                     ui.is_enabled(),
                     mask_if_password(password, prev_text.as_str()),
-                    mask_if_password(password, text),
+                    mask_if_password(password, &text),
                     hint_text_str.as_str(),
                 )
             });
@@ -894,10 +916,10 @@ fn mask_if_password(is_password: bool, text: &str) -> String {
 
 /// Check for (keyboard) events to edit the cursor and/or text.
 #[expect(clippy::too_many_arguments)]
-fn events(
+fn events<T>(
     ui: &crate::Ui,
     state: &mut TextEditState,
-    text: &mut dyn TextBuffer,
+    text: &mut T,
     galley: &mut Arc<Galley>,
     layouter: &mut dyn FnMut(&Ui, &dyn TextBuffer, f32) -> Arc<Galley>,
     id: Id,
@@ -908,7 +930,11 @@ fn events(
     char_limit: usize,
     event_filter: EventFilter,
     return_key: Option<KeyboardShortcut>,
-) -> (bool, CCursorRange) {
+) -> (bool, CCursorRange)
+where
+    T: DerefMut,
+    T::Target: TextBuffer,
+{
     let os = ui.ctx().os();
 
     let mut cursor_range = state.cursor.range(galley).unwrap_or(default_cursor_range);
@@ -951,12 +977,14 @@ fn events(
                 if cursor_range.is_empty() {
                     None
                 } else {
+                    let text = &mut *text;
                     copy_if_not_password(ui, cursor_range.slice_str(text).to_owned());
                     Some(CCursorRange::one(text.delete_selected(&cursor_range)))
                 }
             }
             Event::Paste(text_to_insert) => {
                 if !text_to_insert.is_empty() {
+                    let text = &mut *text;
                     let mut ccursor = text.delete_selected(&cursor_range);
                     if multiline {
                         text.insert_text_at(&mut ccursor, text_to_insert, char_limit);
@@ -973,6 +1001,7 @@ fn events(
             Event::Text(text_to_insert) => {
                 // Newlines are handled by `Key::Enter`.
                 if !text_to_insert.is_empty() && text_to_insert != "\n" && text_to_insert != "\r" {
+                    let text = &mut *text;
                     let mut ccursor = text.delete_selected(&cursor_range);
 
                     text.insert_text_at(&mut ccursor, text_to_insert, char_limit);
@@ -988,6 +1017,7 @@ fn events(
                 modifiers,
                 ..
             } if multiline => {
+                let text = &mut *text;
                 let mut ccursor = text.delete_selected(&cursor_range);
                 if modifiers.shift {
                     // TODO(emilk): support removing indentation over a selection?
@@ -1007,6 +1037,7 @@ fn events(
             }) =>
             {
                 if multiline {
+                    let text = &mut *text;
                     let mut ccursor = text.delete_selected(&cursor_range);
                     text.insert_text_at(&mut ccursor, "\n", char_limit);
                     // TODO(emilk): if code editor, auto-indent by same leading tabs, + one if the lines end on an opening bracket
@@ -1071,6 +1102,7 @@ fn events(
                     } else {
                         // Empty prediction can be produced when user press backspace
                         // or escape during IME, so we clear current text.
+                        let text = &mut *text;
                         let mut ccursor = text.delete_selected(&cursor_range);
                         let start_cursor = ccursor;
                         if !text_mark.is_empty() {
@@ -1090,6 +1122,7 @@ fn events(
                             && cursor_range.secondary.index
                                 == state.ime_cursor_range.secondary.index
                         {
+                            let text = &mut *text;
                             let mut ccursor = text.delete_selected(&cursor_range);
                             text.insert_text_at(&mut ccursor, prediction, char_limit);
                             Some(CCursorRange::one(ccursor))
@@ -1112,7 +1145,7 @@ fn events(
             any_change = true;
 
             // Layout again to avoid frame delay, and to keep `text` and `galley` in sync.
-            *galley = layouter(ui, text, wrap_width);
+            *galley = layouter(ui, &*text, wrap_width);
 
             // Set cursor_range using new galley:
             cursor_range = new_ccursor_range;
@@ -1153,14 +1186,20 @@ fn remove_ime_incompatible_events(events: &mut Vec<Event>) {
 // ----------------------------------------------------------------------------
 
 /// Returns `Some(new_cursor)` if we did mutate `text`.
-fn check_for_mutating_key_press(
+fn check_for_mutating_key_press<T>(
     os: OperatingSystem,
     cursor_range: &CCursorRange,
-    text: &mut dyn TextBuffer,
+    text: &mut T,
     galley: &Galley,
     modifiers: &Modifiers,
     key: Key,
-) -> Option<CCursorRange> {
+) -> Option<CCursorRange>
+where
+    T: DerefMut,
+    T::Target: TextBuffer,
+{
+    let text = &mut *text;
+
     match key {
         Key::Backspace => {
             let ccursor = if modifiers.mac_cmd {
