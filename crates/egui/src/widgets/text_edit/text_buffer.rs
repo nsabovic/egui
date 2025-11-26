@@ -1,4 +1,7 @@
-use std::{borrow::Cow, ops::Range};
+use std::{
+    borrow::Cow,
+    ops::{Deref, Range},
+};
 
 use epaint::{
     Galley,
@@ -17,12 +20,9 @@ use crate::{
 /// an underlying buffer.
 ///
 /// Most likely you will use a [`String`] which implements [`TextBuffer`].
-pub trait TextBuffer {
+pub trait TextBuffer: Deref<Target = str> {
     /// Can this text be edited?
     fn is_mutable(&self) -> bool;
-
-    /// Returns this buffer as a `str`.
-    fn as_str(&self) -> &str;
 
     /// Inserts text `text` into this buffer at character index `char_index`.
     ///
@@ -41,20 +41,20 @@ pub trait TextBuffer {
 
     /// Reads the given character range.
     fn char_range(&self, char_range: Range<usize>) -> &str {
-        slice_char_range(self.as_str(), char_range)
+        slice_char_range(self, char_range)
     }
 
     fn byte_index_from_char_index(&self, char_index: usize) -> usize {
-        byte_index_from_char_index(self.as_str(), char_index)
+        byte_index_from_char_index(self, char_index)
     }
 
     fn char_index_from_byte_index(&self, char_index: usize) -> usize {
-        char_index_from_byte_index(self.as_str(), char_index)
+        char_index_from_byte_index(self, char_index)
     }
 
     /// Clears all characters in this buffer
     fn clear(&mut self) {
-        self.delete_char_range(0..self.as_str().len());
+        self.delete_char_range(0..self.len());
     }
 
     /// Replaces all contents of this string with `text`
@@ -65,7 +65,7 @@ pub trait TextBuffer {
 
     /// Clears all characters in this buffer and returns a string of the contents.
     fn take(&mut self) -> String {
-        let s = self.as_str().to_owned();
+        let s = self.to_owned();
         self.clear();
         s
     }
@@ -74,7 +74,7 @@ pub trait TextBuffer {
         if char_limit < usize::MAX {
             let mut new_string = text_to_insert;
             // Avoid subtract with overflow panic
-            let cutoff = char_limit.saturating_sub(self.as_str().chars().count());
+            let cutoff = char_limit.saturating_sub(self.chars().count());
 
             new_string = match new_string.char_indices().nth(cutoff) {
                 None => new_string,
@@ -88,12 +88,11 @@ pub trait TextBuffer {
     }
 
     fn decrease_indentation(&mut self, ccursor: &mut CCursor) {
-        let line_start = find_line_start(self.as_str(), *ccursor);
+        let line_start = find_line_start(self, *ccursor);
 
-        let remove_len = if self.as_str().chars().nth(line_start.index) == Some('\t') {
+        let remove_len = if self.chars().nth(line_start.index) == Some('\t') {
             Some(1)
         } else if self
-            .as_str()
             .chars()
             .skip(line_start.index)
             .take(TAB_SIZE)
@@ -140,12 +139,12 @@ pub trait TextBuffer {
     }
 
     fn delete_previous_word(&mut self, max_ccursor: CCursor) -> CCursor {
-        let min_ccursor = ccursor_previous_word(self.as_str(), max_ccursor);
+        let min_ccursor = ccursor_previous_word(self, max_ccursor);
         self.delete_selected_ccursor_range([min_ccursor, max_ccursor])
     }
 
     fn delete_next_word(&mut self, min_ccursor: CCursor) -> CCursor {
-        let max_ccursor = ccursor_next_word(self.as_str(), min_ccursor);
+        let max_ccursor = ccursor_next_word(self, min_ccursor);
         self.delete_selected_ccursor_range([min_ccursor, max_ccursor])
     }
 
@@ -216,10 +215,6 @@ impl TextBuffer for String {
         true
     }
 
-    fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         // Get the byte index from the character index
         let byte_idx = byte_index_from_char_index(self.as_str(), char_index);
@@ -266,10 +261,6 @@ impl TextBuffer for Cow<'_, str> {
         true
     }
 
-    fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         <String as TextBuffer>::insert_text(self.to_mut(), text, char_index)
     }
@@ -299,10 +290,6 @@ impl TextBuffer for Cow<'_, str> {
 impl TextBuffer for &str {
     fn is_mutable(&self) -> bool {
         false
-    }
-
-    fn as_str(&self) -> &str {
-        self
     }
 
     fn insert_text(&mut self, _text: &str, _ch_idx: usize) -> usize {

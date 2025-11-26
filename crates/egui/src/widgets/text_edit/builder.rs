@@ -500,7 +500,7 @@ impl TextEdit<'_> {
             // .unwrap_or_else(|| ui.style().interact(&response).text_color()); // too bright
             .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color());
 
-        let prev_text = text.as_str().to_owned();
+        let prev_text = text.to_owned();
         let hint_text_str = hint_text.text().to_owned();
 
         let font_id = font_selection.resolve(ui.style());
@@ -516,7 +516,7 @@ impl TextEdit<'_> {
 
         let font_id_clone = font_id.clone();
         let mut default_layouter = move |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
-            let text = mask_if_password(password, text.as_str());
+            let text = mask_if_password(password, text);
             let layout_job = if multiline {
                 LayoutJob::simple(text, font_id_clone.clone(), text_color, wrap_width)
             } else {
@@ -689,7 +689,7 @@ impl TextEdit<'_> {
         };
 
         if ui.is_rect_visible(rect) {
-            if text.as_str().is_empty() && !hint_text.is_empty() {
+            if text.is_empty() && !hint_text.is_empty() {
                 let hint_text_color = ui.visuals().weak_text_color();
                 let hint_text_font_id = hint_text_font.unwrap_or(font_id.into());
                 let galley = if multiline {
@@ -820,7 +820,7 @@ impl TextEdit<'_> {
                 WidgetInfo::text_edit(
                     ui.is_enabled(),
                     mask_if_password(password, prev_text.as_str()),
-                    mask_if_password(password, text.as_str()),
+                    mask_if_password(password, text),
                     hint_text_str.as_str(),
                 )
             });
@@ -830,7 +830,7 @@ impl TextEdit<'_> {
             let info = WidgetInfo::text_selection_changed(
                 ui.is_enabled(),
                 char_range,
-                mask_if_password(password, text.as_str()),
+                mask_if_password(password, text),
             );
             response.output_event(OutputEvent::TextSelectionChanged(info));
         } else {
@@ -838,7 +838,7 @@ impl TextEdit<'_> {
                 WidgetInfo::text_edit(
                     ui.is_enabled(),
                     mask_if_password(password, prev_text.as_str()),
-                    mask_if_password(password, text.as_str()),
+                    mask_if_password(password, text),
                     hint_text_str.as_str(),
                 )
             });
@@ -915,10 +915,10 @@ fn events(
 
     // We feed state to the undoer both before and after handling input
     // so that the undoer creates automatic saves even when there are no events for a while.
-    state.undoer.lock().feed_state(
-        ui.input(|i| i.time),
-        &(cursor_range, text.as_str().to_owned()),
-    );
+    state
+        .undoer
+        .lock()
+        .feed_state(ui.input(|i| i.time), &(cursor_range, text.to_owned()));
 
     let copy_if_not_password = |ui: &Ui, text: String| {
         if !password {
@@ -943,7 +943,7 @@ fn events(
 
             Event::Copy => {
                 if !cursor_range.is_empty() {
-                    copy_if_not_password(ui, cursor_range.slice_str(text.as_str()).to_owned());
+                    copy_if_not_password(ui, cursor_range.slice_str(text).to_owned());
                 }
                 None
             }
@@ -951,7 +951,7 @@ fn events(
                 if cursor_range.is_empty() {
                     None
                 } else {
-                    copy_if_not_password(ui, cursor_range.slice_str(text.as_str()).to_owned());
+                    copy_if_not_password(ui, cursor_range.slice_str(text).to_owned());
                     Some(CCursorRange::one(text.delete_selected(&cursor_range)))
                 }
             }
@@ -1026,10 +1026,8 @@ fn events(
                 || (modifiers.matches_logically(Modifiers::SHIFT | Modifiers::COMMAND)
                     && *key == Key::Z) =>
             {
-                if let Some((redo_ccursor_range, redo_txt)) = state
-                    .undoer
-                    .lock()
-                    .redo(&(cursor_range, text.as_str().to_owned()))
+                if let Some((redo_ccursor_range, redo_txt)) =
+                    state.undoer.lock().redo(&(cursor_range, text.to_owned()))
                 {
                     text.replace_with(redo_txt);
                     Some(*redo_ccursor_range)
@@ -1044,10 +1042,8 @@ fn events(
                 modifiers,
                 ..
             } if modifiers.matches_logically(Modifiers::COMMAND) => {
-                if let Some((undo_ccursor_range, undo_txt)) = state
-                    .undoer
-                    .lock()
-                    .undo(&(cursor_range, text.as_str().to_owned()))
+                if let Some((undo_ccursor_range, undo_txt)) =
+                    state.undoer.lock().undo(&(cursor_range, text.to_owned()))
                 {
                     text.replace_with(undo_txt);
                     Some(*undo_ccursor_range)
@@ -1125,10 +1121,10 @@ fn events(
 
     state.cursor.set_char_range(Some(cursor_range));
 
-    state.undoer.lock().feed_state(
-        ui.input(|i| i.time),
-        &(cursor_range, text.as_str().to_owned()),
-    );
+    state
+        .undoer
+        .lock()
+        .feed_state(ui.input(|i| i.time), &(cursor_range, text.to_owned()));
 
     (any_change, cursor_range)
 }
